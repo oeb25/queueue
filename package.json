@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "parcel src/index.html",
-    "build": "NODE_ENV=production parcel build src/index.html --mode production",
+    "build": "NODE_ENV=production parcel build src/index.html",
     "zeus": "zeus schema.gql ./tmp --ts && echo 'type Opaque<Type, Token = unknown> = Type & { readonly __opaque__: Token };' > src/graphql-zeus.ts; cat tmp/graphql-zeus.ts | sed -E 's/type ([a-zA-Z]+) = any/type \\1 = Opaque<string, \"\\1\">/' >> src/graphql-zeus.ts; rm -rf tmp/"
   },
   "keywords": [],
