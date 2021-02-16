@@ -94,37 +94,41 @@ const App: React.FC<{}> = ({}) => {
                 Hello, welcome to <span className="font-bold">Queueue</span>
               </p>
 
-              <p className="text-center">
-                If you're a student, your teacher should have provided you with
-                a link just for your queueue!
+              <p className="text-2xl text-center">
+                Your teacher should have provided you with a link just for your
+                queue!
               </p>
 
               <hr />
 
-              <p className="text-center">
-                If you're a teacher looking to create a queueue for your
-                students, click below!
-              </p>
+              <details className="transition-opacity opacity-10 hover:opacity-100">
+                <summary className="cursor-pointer">
+                  If you're a teacher looking to create a queue for your
+                  students, click here!
+                </summary>
 
-              <button
-                className="p-2 border rounded shadow"
-                onClick={async () => {
-                  const res = await remote.createRoom({});
-                  const {
-                    createRoom: { roomId, secret },
-                  } = res;
+                <div className="grid p-2 place-items-center">
+                  <button
+                    className="p-2 border rounded shadow"
+                    onClick={async () => {
+                      const res = await remote.createRoom({});
+                      const {
+                        createRoom: { roomId, secret },
+                      } = res;
 
-                  window.history.pushState(
-                    {},
-                    "Room " + roomId,
-                    `/?room=${roomId}&secret=${secret}`
-                  );
-                  setSecret(secret);
-                  setRoomId(roomId);
-                }}
-              >
-                Create queueue
-              </button>
+                      window.history.pushState(
+                        {},
+                        "Room " + roomId,
+                        `/?room=${roomId}&secret=${secret}`
+                      );
+                      setSecret(secret);
+                      setRoomId(roomId);
+                    }}
+                  >
+                    Create a new queue
+                  </button>
+                </div>
+              </details>
             </div>
           ) : data.isAdmin ? (
             <AdminView roomId={data.roomId} secret={data.secret} />
@@ -180,7 +184,7 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
         <span className="bg-transparent select-all">{studentLink}</span>
       </p>
       <p className="pb-2">
-        <span className="text-gray-300">Queueue is: </span>
+        <span className="text-gray-300">Queue is: </span>
         <select
           className="font-bold bg-transparent"
           value={data.room.isOpen ? "open" : "closed"}
