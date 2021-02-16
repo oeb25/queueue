@@ -1,0 +1,39 @@
+type QueryRoot {
+	rooms: [RoomObject!]!
+	room(id: RoomId!): RoomObject
+}
+type RoomObject {
+	id: RoomId!
+	tickets(secret: Secret!): [TicketObject!]!
+	ticket(id: TicketId!): TicketObject
+	isSecret(secret: Secret): Boolean!
+	isOpen: Boolean!
+}
+scalar RoomId
+scalar Secret
+type TicketObject {
+	id: TicketId!
+	body: String!
+	status: TicketStatus!
+}
+scalar TicketId
+type TicketStatus {
+	position: Int
+	isBeingHelped: Boolean!
+	isInQueue: Boolean!
+}
+type MutationRoot {
+	createRoom: CreateRoomResponse!
+	enterQueue(roomId: RoomId!, body: String!): TicketObject!
+	leaveQueue(roomId: RoomId!, ticketId: TicketId!): Boolean!
+	setHelp(roomId: RoomId!, ticketId: TicketId!, secret: Secret!, help: Boolean!): Boolean!
+	setOpen(roomId: RoomId!, secret: Secret!, open: Boolean!): Boolean!
+}
+type CreateRoomResponse {
+	roomId: RoomId!
+	secret: Secret!
+}
+schema {
+	query: QueryRoot
+	mutation: MutationRoot
+}

@@ -1,46 +1,49 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
+use async_graphql::{
+    http::{playground_source, GraphQLPlaygroundConfig},
+    Context, EmptySubscription, InputValueError, InputValueResult, Object, Scalar, ScalarType,
+    Schema, SimpleObject, Value,
+};
 use async_std::sync::Mutex;
-use tide::Request;
-use tide::{http::headers::HeaderValue, prelude::*};
-// use http_types::headers::HeaderValue;
-use tide::security::{CorsMiddleware, Origin};
+use tide::{
+    http::{headers::HeaderValue, mime},
+    security::{CorsMiddleware, Origin},
+};
 use uuid::Uuid;
 
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Clone, Copy)]
-#[serde(transparent)]
-struct RoomId(Uuid);
+macro_rules! id {
+    ($name:ident) => {
+        #[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+        struct $name(Uuid);
 
-impl RoomId {
-    fn new() -> Self {
-        RoomId(Uuid::new_v4())
-    }
+        impl $name {
+            fn new() -> Self {
+                $name(Uuid::new_v4())
+            }
+        }
+
+        #[Scalar]
+        impl ScalarType for $name {
+            fn parse(value: Value) -> InputValueResult<Self> {
+                match value {
+                    Value::String(s) => Ok($name(Uuid::parse_str(&s).map_err(|_| {
+                        InputValueError::custom(concat!("Invalid ", stringify!($name)))
+                    })?)),
+                    _ => Err(InputValueError::custom("Value must be string")),
+                }
+            }
+
+            fn to_value(&self) -> Value {
+                Value::String(self.0.to_string())
+            }
+        }
+    };
 }
 
-#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Clone, Copy)]
-#[serde(transparent)]
-struct TicketId(Uuid);
-
-impl TicketId {
-    fn new() -> Self {
-        TicketId(Uuid::new_v4())
-    }
-}
-
-impl FromStr for RoomId {
-    type Err = <Uuid as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(RoomId(s.parse()?))
-    }
-}
-impl FromStr for TicketId {
-    type Err = <Uuid as FromStr>::Err;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(TicketId(s.parse()?))
-    }
-}
+id!(RoomId);
+id!(TicketId);
+id!(Secret);
 
 #[derive(Debug, Default)]
 struct Hub {
@@ -50,34 +53,35 @@ struct Hub {
 #[derive(Debug)]
 struct Room {
     queue: Vec<Ticket>,
-    secret: Uuid,
+    secret: Secret,
+    is_open: bool,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 struct Ticket {
     id: TicketId,
-    group_name: String,
+    body: String,
     help: bool,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug)]
 enum TicketStatus {
     Helped,
     Queued { position: usize },
+    NotInQueue,
 }
 
 impl Hub {
-    fn new_room(&mut self) -> (RoomId, Uuid) {
+    fn new_room(&mut self) -> (RoomId, Secret) {
         let id = RoomId::new();
-        let secret = Uuid::new_v4();
+        let secret = Secret::new();
 
         self.rooms.insert(
             id,
             Arc::new(Mutex::new(Room {
                 queue: vec![],
                 secret,
+                is_open: false,
             })),
         );
 
@@ -89,41 +93,50 @@ impl Hub {
 }
 
 impl Room {
-    fn enter_queue(&mut self, group_name: String) -> TicketId {
+    fn enter_queue(&mut self, body: String) -> TicketId {
         let id = TicketId::new();
         self.queue.push(Ticket {
             id,
-            group_name,
+            body,
             help: false,
         });
         id
     }
-    fn get_ticket_status(&self, id: TicketId) -> Option<TicketStatus> {
-        let (position, t) = self.queue.iter().enumerate().find(|(_, t)| t.id == id)?;
-
-        if t.help {
-            Some(TicketStatus::Helped)
+    fn get_ticket(&self, id: TicketId) -> Option<(usize, &Ticket)> {
+        self.queue.iter().enumerate().find(|(_, t)| t.id == id)
+    }
+    fn get_ticket_mut(&mut self, id: TicketId) -> Option<(usize, &mut Ticket)> {
+        self.queue.iter_mut().enumerate().find(|(_, t)| t.id == id)
+    }
+    fn get_ticket_status(&self, id: TicketId) -> TicketStatus {
+        if let Some((position, t)) = self.get_ticket(id) {
+            if t.help {
+                TicketStatus::Helped
+            } else {
+                TicketStatus::Queued { position }
+            }
         } else {
-            Some(TicketStatus::Queued { position })
+            TicketStatus::NotInQueue
         }
     }
     fn remove_from_queue(&mut self, id: TicketId) -> Option<Ticket> {
-        let i = self.queue.iter().position(|t| t.id == id)?;
+        let (i, _) = self.get_ticket(id)?;
 
         Some(self.queue.remove(i))
     }
-    fn is_secret(&self, secret: Uuid) -> bool {
+    fn is_secret(&self, secret: Secret) -> bool {
         self.secret == secret
     }
-    fn get_queue(&self) -> &[Ticket] {
-        &self.queue
-    }
     fn set_help(&mut self, id: TicketId, help: bool) -> Option<()> {
-        let t = self.queue.iter_mut().find(|t| t.id == id)?;
-
-        t.help = help;
+        self.get_ticket_mut(id)?.1.help = help;
 
         Some(())
+    }
+    fn is_open(&self) -> bool {
+        self.is_open
+    }
+    fn set_open(&mut self, open: bool) {
+        self.is_open = open;
     }
 }
 
@@ -134,10 +147,8 @@ struct State {
 
 impl State {
     async fn get_room(&self, id: RoomId) -> tide::Result<Arc<Mutex<Room>>> {
-        Ok(self
-            .hub
-            .lock()
-            .await
+        let hub = self.hub.lock().await;
+        Ok(hub
             .get_room(id)
             .ok_or_else(|| tide::Error::from_str(401, "room does not exist"))?)
     }
@@ -153,169 +164,232 @@ async fn main() -> tide::Result<()> {
 
     let hub = Arc::new(Mutex::new(Hub::default()));
 
-    let mut app = tide::with_state(State { hub });
+    let schema = Schema::build(QueryRoot, MutationRoot, EmptySubscription)
+        .data(State { hub })
+        .finish();
+
+    #[cfg(debug_assertions)]
+    {
+        std::fs::write("./schema.gql", schema.sdl()).expect("failed to write schema");
+    }
+
+    let mut app = tide::new();
 
     app.with(cors);
 
-    app.at("createRoom").post(create_room);
+    app.at("/graphql")
+        .post(async_graphql_tide::endpoint(schema));
 
-    let mut rooms = app.at("/room");
-    let mut room = rooms.at("/:room");
+    // enable graphql playground
+    app.at("/").get(|_| async move {
+        Ok(tide::Response::builder(tide::StatusCode::Ok)
+            .body(tide::Body::from_string(playground_source(
+                GraphQLPlaygroundConfig::new("/graphql"),
+            )))
+            .content_type(mime::HTML)
+            .build())
+    });
 
-    room.at("/join").post(join_room);
-    room.at("/enter").post(enter_queue);
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8081".to_string());
 
-    room.at("/joinAdmin").post(join_room_as_admin);
-    room.at("/getQueue").post(get_queue);
-
-    let mut ticket = room.at("/:ticket");
-
-    ticket.at("/leave").post(leave_queue);
-    ticket.at("/position").post(get_queue_position);
-    ticket.at("/help").post(help);
-    ticket.at("/unhelp").post(unhelp);
-    ticket.at("/remove").post(remove_from_queue);
-
-    app.listen("127.0.0.1:8081").await?;
+    app.listen(format!("0.0.0.0:{}", port)).await?;
     Ok(())
 }
 
-/** User commands */
+struct QueryRoot;
 
-async fn create_room(req: Request<State>) -> tide::Result {
-    let (room_id, secret) = req.state().hub.lock().await.new_room();
-
-    Ok(json!({ "roomId": room_id, "secret": secret }).into())
-}
-
-async fn join_room(req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let _room = req.state().get_room(room_id).await?;
-
-    Ok(json!({ "success": true }).into())
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EnterQueueParams {
-    group_name: String,
-}
-
-async fn enter_queue(mut req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let EnterQueueParams { group_name } = req.body_json().await?;
-    let room = req.state().get_room(room_id).await?;
-    let mut room = room.lock().await;
-
-    let ticket = room.enter_queue(group_name);
-
-    Ok(json!(ticket).into())
-}
-async fn leave_queue(req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let ticket_id = req.param("ticket")?.parse()?;
-    let room = req.state().get_room(room_id).await?;
-    let mut room = room.lock().await;
-
-    room.remove_from_queue(ticket_id)
-        .ok_or_else(|| tide::Error::from_str(401, "ticket is not in queue"))?;
-
-    Ok(json!({ "success": true }).into())
-}
-async fn get_queue_position(req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let ticket_id = req.param("ticket")?.parse()?;
-    let room = req.state().get_room(room_id).await?;
-    let room = room.lock().await;
-
-    let info = room
-        .get_ticket_status(ticket_id)
-        .ok_or_else(|| tide::Error::from_str(401, "ticket is not in queue"))?;
-
-    Ok(json!(info).into())
-}
-
-/** Admin commands */
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AdminBody {
-    secret: Uuid,
-}
-
-async fn join_room_as_admin(mut req: Request<State>) -> tide::Result {
-    println!("JOIN ADMIN!!!");
-
-    let room_id = RoomId(uuid::Uuid::from_str(req.param("room")?)?);
-    let AdminBody { secret } = req.body_json().await?;
-    let room = req.state().get_room(room_id).await?;
-    let room = room.lock().await;
-
-    if !room.is_secret(secret) {
-        return Err(tide::Error::from_str(401, "secret does not match"));
+#[Object]
+impl QueryRoot {
+    #[cfg(debug_assertions)]
+    async fn rooms(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<RoomObject>> {
+        Ok(ctx
+            .data::<State>()?
+            .hub
+            .lock()
+            .await
+            .rooms
+            .iter()
+            .map(|(&id, r)| RoomObject {
+                id,
+                room: r.clone(),
+            })
+            .collect())
     }
-
-    Ok(json!({ "success": true }).into())
-}
-async fn get_queue(mut req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let AdminBody { secret } = req.body_json().await?;
-    let room = req.state().get_room(room_id).await?;
-    let room = room.lock().await;
-
-    if !room.is_secret(secret) {
-        return Err(tide::Error::from_str(401, "secret does not match"));
+    async fn room(
+        &self,
+        ctx: &Context<'_>,
+        id: RoomId,
+    ) -> async_graphql::Result<Option<RoomObject>> {
+        if let Ok(room) = ctx.data::<State>()?.get_room(id).await {
+            Ok(Some(RoomObject { id, room }))
+        } else {
+            Ok(None)
+        }
     }
-
-    let queue = room.get_queue();
-
-    Ok(json!(queue).into())
 }
-async fn help(mut req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let ticket_id = req.param("ticket")?.parse()?;
-    let AdminBody { secret } = req.body_json().await?;
-    let room = req.state().get_room(room_id).await?;
-    let mut room = room.lock().await;
 
-    if !room.is_secret(secret) {
-        return Err(tide::Error::from_str(401, "secret does not match"));
-    }
-
-    room.set_help(ticket_id, true)
-        .ok_or_else(|| tide::Error::from_str(401, "ticket is not in queue"))?;
-
-    Ok(json!({ "success": true }).into())
+#[derive(Clone)]
+struct RoomObject {
+    id: RoomId,
+    room: Arc<Mutex<Room>>,
 }
-async fn unhelp(mut req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let ticket_id = req.param("ticket")?.parse()?;
-    let AdminBody { secret } = req.body_json().await?;
-    let room = req.state().get_room(room_id).await?;
-    let mut room = room.lock().await;
 
-    if !room.is_secret(secret) {
-        return Err(tide::Error::from_str(401, "secret does not match"));
+#[Object]
+impl RoomObject {
+    async fn id(&self) -> RoomId {
+        self.id
     }
+    async fn tickets(&self, secret: Secret) -> async_graphql::Result<Vec<TicketObject>> {
+        let room = self.room.lock().await;
+        if !room.is_secret(secret) {
+            return Err(async_graphql::Error::new("Secret is not correct"));
+        }
 
-    room.set_help(ticket_id, false)
-        .ok_or_else(|| tide::Error::from_str(401, "ticket is not in queue"))?;
+        Ok(room
+            .queue
+            .iter()
+            .map(|q| TicketObject {
+                room_object: self.clone(),
+                body: q.body.clone(),
+                id: q.id,
+            })
+            .collect())
+    }
+    async fn ticket(&self, id: TicketId) -> async_graphql::Result<Option<TicketObject>> {
+        let room = self.room.lock().await;
 
-    Ok(json!({ "success": true }).into())
+        Ok(room.get_ticket(id).map(|(_, q)| TicketObject {
+            room_object: self.clone(),
+            body: q.body.clone(),
+            id: q.id,
+        }))
+    }
+    async fn is_secret(&self, secret: Option<Secret>) -> bool {
+        match secret {
+            Some(secret) => self.room.lock().await.is_secret(secret),
+            None => false,
+        }
+    }
+    async fn is_open(&self) -> bool {
+        let room = self.room.lock().await;
+
+        room.is_open()
+    }
 }
-async fn remove_from_queue(mut req: Request<State>) -> tide::Result {
-    let room_id = req.param("room")?.parse()?;
-    let ticket_id = req.param("ticket")?.parse()?;
-    let AdminBody { secret } = req.body_json().await?;
-    let room = req.state().get_room(room_id).await?;
-    let mut room = room.lock().await;
 
-    if !room.is_secret(secret) {
-        return Err(tide::Error::from_str(401, "secret does not match"));
+struct TicketObject {
+    room_object: RoomObject,
+    id: TicketId,
+    body: String,
+}
+
+#[Object]
+impl TicketObject {
+    async fn id(&self) -> TicketId {
+        self.id
     }
+    async fn body(&self) -> String {
+        self.body.clone()
+    }
+    async fn status(&self) -> async_graphql::Result<TicketStatus> {
+        let room = self.room_object.room.lock().await;
+        let status = room.get_ticket_status(self.id);
+        Ok(status)
+    }
+}
 
-    room.remove_from_queue(ticket_id)
-        .ok_or_else(|| tide::Error::from_str(401, "ticket is not in queue"))?;
+#[Object]
+impl TicketStatus {
+    async fn position(&self) -> Option<usize> {
+        match self {
+            TicketStatus::Queued { position } => Some(*position),
+            _ => None,
+        }
+    }
+    async fn is_being_helped(&self) -> bool {
+        matches!(self, TicketStatus::Helped)
+    }
+    async fn is_in_queue(&self) -> bool {
+        !matches!(self, TicketStatus::NotInQueue)
+    }
+}
 
-    Ok(json!({ "success": true }).into())
+struct MutationRoot;
+
+#[Object]
+impl MutationRoot {
+    async fn create_room(&self, ctx: &Context<'_>) -> async_graphql::Result<CreateRoomResponse> {
+        let (room_id, secret) = ctx.data::<State>()?.hub.lock().await.new_room();
+        Ok(CreateRoomResponse { room_id, secret })
+    }
+    async fn enter_queue(
+        &self,
+        ctx: &Context<'_>,
+        room_id: RoomId,
+        body: String,
+    ) -> async_graphql::Result<TicketObject> {
+        let room_ref = ctx.data::<State>()?.get_room(room_id).await?;
+        let ticket = room_ref.lock().await.enter_queue(body.clone());
+
+        Ok(TicketObject {
+            room_object: RoomObject {
+                id: room_id,
+                room: room_ref,
+            },
+            body,
+            id: ticket,
+        })
+    }
+    async fn leave_queue(
+        &self,
+        ctx: &Context<'_>,
+        room_id: RoomId,
+        ticket_id: TicketId,
+    ) -> async_graphql::Result<bool> {
+        let room = ctx.data::<State>()?.get_room(room_id).await?;
+        let ticket = room.lock().await.remove_from_queue(ticket_id);
+
+        Ok(ticket.is_some())
+    }
+    async fn set_help(
+        &self,
+        ctx: &Context<'_>,
+        room_id: RoomId,
+        ticket_id: TicketId,
+        secret: Secret,
+        help: bool,
+    ) -> async_graphql::Result<bool> {
+        let room = ctx.data::<State>()?.get_room(room_id).await?;
+        let mut room = room.lock().await;
+        if !room.is_secret(secret) {
+            return Err(async_graphql::Error::new("Secret is not correct"));
+        }
+
+        let ticket = room.set_help(ticket_id, help);
+
+        Ok(ticket.is_some())
+    }
+    async fn set_open(
+        &self,
+        ctx: &Context<'_>,
+        room_id: RoomId,
+        secret: Secret,
+        open: bool,
+    ) -> async_graphql::Result<bool> {
+        let room = ctx.data::<State>()?.get_room(room_id).await?;
+        let mut room = room.lock().await;
+        if !room.is_secret(secret) {
+            return Err(async_graphql::Error::new("Secret is not correct"));
+        }
+
+        room.set_open(open);
+
+        Ok(open)
+    }
+}
+
+#[derive(Debug, SimpleObject)]
+struct CreateRoomResponse {
+    room_id: RoomId,
+    secret: Secret,
 }
