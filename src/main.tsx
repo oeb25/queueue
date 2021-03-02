@@ -1,15 +1,17 @@
 import "./styles.css";
 
+// @ts-ignore
+import notificationSound from "url:./notification.wav";
+
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import {
   QueryClient,
   QueryClientProvider,
-  QueryObserverResult,
   useQuery,
+  focusManager,
 } from "react-query";
 import * as remote from "./data";
-import { UnwrapPromise } from "./graphql-zeus";
 
 const queryClient = new QueryClient();
 
@@ -150,6 +152,19 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
     () => remote.adminViewQuery({ roomId, secret }),
     { refetchInterval: 1000 }
   );
+
+  const lastCount = React.useRef(0);
+
+  React.useEffect(() => {
+    focusManager.setFocused(true);
+
+    if (!data?.room?.tickets) return;
+    if (lastCount.current < data.room.tickets.length) {
+      const audio = new Audio(notificationSound);
+      audio.play();
+    }
+    lastCount.current = data.room.tickets.length;
+  }, [data?.room?.tickets.length]);
 
   const [
     youAreHelping,
