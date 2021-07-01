@@ -1,8 +1,11 @@
-import { RoomId, TicketId, Secret, Chain, $ } from "./graphql-zeus";
-export { $, RoomId, TicketId, Secret } from "./graphql-zeus";
+import { Chain, $, ValueTypes } from "./zeus";
+
+export type RoomId = ValueTypes["RoomId"];
+export type TicketId = ValueTypes["TicketId"];
+export type Secret = ValueTypes["Secret"];
 
 export const Gql = Chain(
-  process.env.API_URL || "http://localhost:8081/graphql"
+  import.meta.env.API_URL || "http://localhost:8081/graphql"
 );
 
 export const toRoomId = (s: string) => s as RoomId;

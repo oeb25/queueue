@@ -1,7 +1,7 @@
 import "./styles.css";
 
 // @ts-ignore
-import notificationSound from "url:./notification.wav";
+import notificationSound from "./notification.wav";
 
 import * as React from "react";
 import * as ReactDOM from "react-dom";
@@ -147,7 +147,12 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
   roomId,
   secret,
 }) => {
-  const { error, isLoading, data, refetch: refetchQueue } = useQuery(
+  const {
+    error,
+    isLoading,
+    data,
+    refetch: refetchQueue,
+  } = useQuery(
     ["queueueue", roomId, secret],
     () => remote.adminViewQuery({ roomId, secret }),
     { refetchInterval: 1000 }
@@ -166,10 +171,8 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
     lastCount.current = data.room.tickets.length;
   }, [data?.room?.tickets.length]);
 
-  const [
-    youAreHelping,
-    setYouAreHelping,
-  ] = React.useState<null | remote.TicketId>(null);
+  const [youAreHelping, setYouAreHelping] =
+    React.useState<null | remote.TicketId>(null);
 
   if (error) {
     console.error(error);
