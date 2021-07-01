@@ -5,7 +5,7 @@ export type TicketId = ValueTypes["TicketId"];
 export type Secret = ValueTypes["Secret"];
 
 export const Gql = Chain(
-  import.meta.env.API_URL || "http://localhost:8081/graphql"
+  import.meta.env.VITE_API_URL || "http://localhost:8081/graphql"
 );
 
 export const toRoomId = (s: string) => s as RoomId;
