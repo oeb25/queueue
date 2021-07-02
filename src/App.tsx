@@ -2,62 +2,56 @@
 import notificationSound from "./notification.wav";
 
 import * as React from "react";
-import { useQuery, focusManager } from "react-query";
-import * as remote from "./data";
+import * as gg from "./gqless";
+
+export type RoomId = gg.Scalars["RoomId"];
+export type TicketId = gg.Scalars["TicketId"];
+export type Secret = gg.Scalars["Secret"];
 
 export const App: React.FC<{}> = ({}) => {
   const params = getSearchParameters();
 
-  const [roomId, setRoomId] = React.useState<null | remote.RoomId>(
-    remote.toRoomId(params["room"]) || null
+  const [roomId, setRoomId] = React.useState<null | RoomId>(
+    (params["room"] as RoomId) || null
   );
-  const [secret, setSecret] = React.useState<null | remote.Secret>(
-    remote.toSecret(params["secret"]) || null
+  const [secret, setSecret] = React.useState<null | Secret>(
+    (params["secret"] as Secret) || null
   );
 
-  const { error, isLoading, data } = useQuery(
-    ["join-room", roomId, secret],
-    async () => {
-      if (!roomId) return null;
+  const query = gg.useQuery({ suspense: true });
 
-      const res = await remote.roomPermissions({
-        roomId,
-        secret,
-      });
+  const room = roomId ? query.room({ id: roomId }) : void 0;
+  const admin =
+    room && room.isSecret({ secret })
+      ? { secret: secret!, roomId: roomId! }
+      : void 0;
 
-      if (!res.room) {
-        return "room does not exist" as const;
-      }
-
-      if (secret && res.room.isSecret) {
-        return { isAdmin: true, roomId, secret } as const;
-      } else {
-        return { isAdmin: false, roomId } as const;
-      }
+  const [createRoom] = gg.useMutation(
+    (mutation) => {
+      const { roomId, secret } = mutation.createRoom;
+      return { roomId, secret };
     },
     {
-      enabled: !!roomId,
-      refetchInterval: 2000,
+      onCompleted({ roomId, secret }) {
+        roomId = roomId!;
+        secret = secret!;
+
+        window.history.pushState(
+          {},
+          "Room " + roomId,
+          `/?${new URLSearchParams({ room: roomId, secret }).toString()}`
+        );
+        setRoomId(roomId);
+        setSecret(secret);
+      },
     }
   );
-
-  if (error) {
-    return <h1>Error: {JSON.stringify(error)}</h1>;
-  }
-  if (isLoading) {
-    return <h1>Loading....</h1>;
-  }
-  if (data == "room does not exist") {
-    setRoomId(null);
-    setSecret(null);
-    return null;
-  }
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen">
       <div className="flex flex-col items-center justify-center w-full max-w-2xl">
         <div className="flex flex-col items-center w-full p-12 text-white bg-gray-700 max-w-xg">
-          {!data ? (
+          {!room ? (
             <div className="grid gap-4 place-items-center">
               <p className="text-xl">
                 Hello, welcome to <span className="font-bold">Queueue</span>
@@ -79,30 +73,21 @@ export const App: React.FC<{}> = ({}) => {
                 <div className="grid p-2 place-items-center">
                   <button
                     className="p-2 border rounded shadow"
-                    onClick={async () => {
-                      const res = await remote.createRoom({});
-                      const {
-                        createRoom: { roomId, secret },
-                      } = res;
-
-                      window.history.pushState(
-                        {},
-                        "Room " + roomId,
-                        `/?room=${roomId}&secret=${secret}`
-                      );
-                      setSecret(secret);
-                      setRoomId(roomId);
-                    }}
+                    onClick={() => createRoom()}
                   >
                     Create a new queue
                   </button>
                 </div>
               </details>
             </div>
-          ) : data.isAdmin ? (
-            <AdminView roomId={data.roomId} secret={data.secret} />
+          ) : admin ? (
+            <React.Suspense fallback="Loading...">
+              <AdminView roomId={admin.roomId} secret={admin.secret} />
+            </React.Suspense>
           ) : (
-            <UserView roomId={data.roomId} />
+            <React.Suspense fallback="Loading...">
+              <UserView roomId={roomId!} />
+            </React.Suspense>
           )}
         </div>
       </div>
@@ -110,54 +95,71 @@ export const App: React.FC<{}> = ({}) => {
   );
 };
 
-const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
+const AdminView: React.FC<{ roomId: RoomId; secret: Secret }> = ({
   roomId,
   secret,
 }) => {
-  const {
-    error,
-    isLoading,
-    data,
-    refetch: refetchQueue,
-  } = useQuery(
-    ["queueueue", roomId, secret],
-    () => remote.adminViewQuery({ roomId, secret }),
-    { refetchInterval: 1000 }
-  );
+  const query = gg.useQuery({
+    suspense: true,
+  });
+  const refetch = gg.useRefetch();
+
+  const room = query.room({ id: roomId });
+  const tickets = room?.tickets({ secret });
+
+  useInterval(() => {
+    refetch(room);
+  }, 1000);
 
   const lastCount = React.useRef(0);
 
   React.useEffect(() => {
-    focusManager.setFocused(true);
-
-    if (!data?.room?.tickets) return;
-    if (lastCount.current < data.room.tickets.length) {
+    if (!tickets) return;
+    if (lastCount.current < tickets.length) {
       const audio = new Audio(notificationSound);
       audio.play();
     }
-    lastCount.current = data.room.tickets.length;
-  }, [data?.room?.tickets.length]);
+    lastCount.current = tickets.length;
+  }, [tickets?.length]);
 
-  const [youAreHelping, setYouAreHelping] =
-    React.useState<null | remote.TicketId>(null);
-
-  if (error) {
-    console.error(error);
-    return <h1>ERROR! {JSON.stringify(error)}</h1>;
-  }
-
-  if ((isLoading && !data) || !data) {
-    return <h1>Loading ...</h1>;
-  }
+  const [youAreHelping, setYouAreHelping] = React.useState<null | TicketId>(
+    null
+  );
 
   const studentLink = window.location.href.split("?")[0] + `?room=${roomId}`;
 
-  if (!data.room) {
+  if (!room || !tickets) {
     // TODO
     return null;
   }
 
-  const queue = data.room.tickets;
+  const [setOpen] = gg.useMutation(
+    (mutation, { open }: { open: boolean }) => {
+      mutation.setOpen({ roomId, secret, open });
+    },
+    { refetchQueries: [room] }
+  );
+  const [setHelp] = gg.useMutation(
+    (mutation, { help, ticketId }: { help: boolean; ticketId: TicketId }) => {
+      mutation.setHelp({ help, roomId, secret, ticketId });
+
+      return { help, ticketId };
+    },
+    {
+      refetchQueries: [tickets],
+      onCompleted({ help, ticketId }) {
+        if (help) {
+          setYouAreHelping(ticketId);
+        }
+      },
+    }
+  );
+  const [removeFromQueue] = gg.useMutation(
+    (mutation, { ticketId }: { ticketId: TicketId }) => {
+      mutation.leaveQueue({ roomId, ticketId });
+    },
+    { refetchQueries: [tickets] }
+  );
 
   return (
     <div className="flex flex-col items-center">
@@ -172,30 +174,29 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
         <span className="text-gray-300">Queue is: </span>
         <select
           className="font-bold bg-transparent"
-          value={data.room.isOpen ? "open" : "closed"}
-          onChange={async (e) => {
-            await remote.setOpen({
-              roomId,
-              secret,
-              open: e.target.value == "open",
-            });
-            refetchQueue();
-          }}
+          value={room.isOpen ? "open" : "closed"}
+          onChange={(e) =>
+            setOpen({ args: { open: e.target.value == "open" } }).catch(
+              console.error
+            )
+          }
         >
           <option value="open">Open</option>
           <option value="closed">Closed</option>
         </select>
       </p>
-      {queue.length == 0 ? (
+      {tickets.length == 0 ? (
         <p className="text-3xl text-center">The queue is currently empty 📭</p>
       ) : (
         <div
           className="grid items-center gap-2"
           style={{ gridTemplateColumns: "1fr auto" }}
         >
-          {queue.map((q) => {
+          {tickets.map((q) => {
+            const ticketId = q.id! ?? ("0" as TicketId);
+
             return (
-              <React.Fragment key={q.id}>
+              <React.Fragment key={ticketId}>
                 <div>Group {q.body}</div>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -203,23 +204,14 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
                       "px-2 py-1 " +
                       (q.status.isBeingHelped ? "bg-blue-700" : "bg-blue-500")
                     }
-                    onClick={async () => {
-                      if (!q.status.isBeingHelped) {
-                        setYouAreHelping(q.id);
-                      }
-
-                      await remote.setHelpStatus({
-                        roomId,
-                        ticketId: q.id,
-                        secret,
-                        help: !q.status.isBeingHelped,
-                      });
-
-                      refetchQueue();
-                    }}
+                    onClick={() =>
+                      setHelp({
+                        args: { help: !q.status.isBeingHelped, ticketId },
+                      })
+                    }
                   >
                     {q.status.isBeingHelped
-                      ? youAreHelping == q.id
+                      ? youAreHelping == ticketId
                         ? "You are helping"
                         : "Unhelp"
                       : "Help!"}
@@ -231,10 +223,7 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
                         ? "bg-gray-900"
                         : "bg-gray-800 cursor-not-allowed opacity-50")
                     }
-                    onClick={async () => {
-                      await remote.removeFromQueue({ roomId, ticketId: q.id });
-                      refetchQueue();
-                    }}
+                    onClick={() => removeFromQueue({ args: { ticketId } })}
                     disabled={!q.status.isBeingHelped}
                   >
                     Remove
@@ -249,71 +238,64 @@ const AdminView: React.FC<{ roomId: remote.RoomId; secret: remote.Secret }> = ({
   );
 };
 
-const useUserActions = ({ roomId }: { roomId: remote.RoomId }) => {
+const UserView: React.FC<{
+  roomId: RoomId;
+}> = ({ roomId }) => {
   const params = getSearchParameters();
 
-  const [ticketId, setTicketId] = React.useState<remote.TicketId | null>(
-    remote.toTicketId(params["ticket"]) || null
+  const [ticketId, setTicketId] = React.useState<TicketId | null>(
+    (params["ticket"] as TicketId) || null
   );
-  const ticketQuery = useQuery(
-    ["ticket", roomId, ticketId],
-    async () => {
-      const ticket = ticketId
-        ? await remote.ticketQuery({ roomId, ticketId })
-        : null;
-      const res = ticket ?? (await remote.queueQuery({ roomId }));
+  const [groupName, setGroupName] = React.useState("");
 
-      return {
-        ...res,
-        room: { ...res.room, ticket: ticket?.room?.ticket },
-      };
-    },
-    { refetchInterval: !!ticketId ? 1000 : 10000 }
-  );
+  const query = gg.useQuery({ suspense: true });
+  const refetch = gg.useRefetch();
 
-  const ticket =
-    ticketQuery.data?.room && ticketQuery.data?.room.ticket
-      ? ticketQuery.data?.room.ticket
-      : null;
+  const room = query.room({ id: roomId });
+  const ticket = ticketId ? room?.ticket({ id: ticketId }) : void 0;
+  const isOpen = room?.isOpen ?? false;
+
+  // React.useEffect(() => {
+  //   if (ticket && !ticket.status.isInQueue) setTicketId(null);
+  // }, [ticket]);
 
   React.useEffect(() => {
-    if (ticket && !ticket.status.isInQueue) setTicketId(null);
-  }, [ticket]);
+    const search = new URLSearchParams({ room: roomId });
+    if (ticketId) search.set("ticket", ticketId);
+    if (params.secret) search.set("secret", params.secret);
 
-  React.useEffect(() => {
-    if (ticketId) {
-      window.history.replaceState(
-        {},
-        "Queueue",
-        `?room=${roomId}&ticket=${ticketId}`
-      );
-    } else {
-      window.history.replaceState({}, "Queueue", `?room=${roomId}`);
-    }
+    window.history.replaceState({}, "Queueue", "?" + search.toString());
   }, [ticketId]);
 
-  return {
-    ticket: ticket,
-    isOpen: ticketQuery.data?.room?.isOpen ?? false,
-    leaveQueue: async () => {
-      if (ticketId) {
-        await remote.removeFromQueue({ roomId, ticketId });
+  const [leaveQueue] = gg.useMutation(
+    (mutation) => {
+      if (!roomId || !ticketId) return;
+
+      mutation.leaveQueue({ roomId, ticketId });
+    },
+    {
+      refetchQueries: [room],
+      onCompleted() {
         setTicketId(null);
-      }
-    },
-    enterQueue: async (groupName: string) => {
-      const res = await remote.enterQueue({ roomId, body: groupName });
-      setTicketId(res.enterQueue.id);
-    },
-  };
-};
+      },
+    }
+  );
+  const [enterQueue] = gg.useMutation(
+    (mutation, { groupName }: { groupName: string }) => {
+      if (!roomId) return;
 
-const UserView: React.FC<{
-  roomId: remote.RoomId;
-}> = ({ roomId }) => {
-  const { ticket, isOpen, leaveQueue, enterQueue } = useUserActions({ roomId });
+      const { id } = mutation.enterQueue({ roomId, body: groupName });
+      return { id };
+    },
+    {
+      refetchQueries: [room],
+      onCompleted(data) {
+        setTicketId(data?.id ?? null);
+      },
+    }
+  );
 
-  const [groupName, setGroupName] = React.useState("");
+  useInterval(() => refetch(room), 1000);
 
   return (
     <>
@@ -342,7 +324,7 @@ const UserView: React.FC<{
               return;
             }
 
-            enterQueue(groupName);
+            enterQueue({ args: { groupName } });
             setGroupName("");
           }}
         >
@@ -376,6 +358,26 @@ const UserView: React.FC<{
     </>
   );
 };
+
+function useInterval(callback: () => void, delay: number) {
+  const savedCallback = React.useRef<() => void>();
+
+  // Remember the latest callback.
+  React.useEffect(() => {
+    savedCallback.current = callback;
+  }, [callback]);
+
+  // Set up the interval.
+  React.useEffect(() => {
+    function tick() {
+      savedCallback.current!();
+    }
+    if (delay !== null) {
+      let id = setInterval(tick, delay);
+      return () => clearInterval(id);
+    }
+  }, [delay]);
+}
 
 function getSearchParameters() {
   return Object.fromEntries(new URLSearchParams(location.search));

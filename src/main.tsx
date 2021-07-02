@@ -10,7 +10,9 @@ const queryClient = new QueryClient();
 const Root: React.FC<{}> = ({}) => {
   return (
     <QueryClientProvider client={queryClient}>
-      <App />
+      <React.Suspense fallback="Loading...">
+        <App />
+      </React.Suspense>
     </QueryClientProvider>
   );
 };
