@@ -16,7 +16,7 @@ import {
 const queryFetcher: QueryFetcher = async function (query, variables) {
   // Modify "/api/graphql" if needed
   const response = await fetch(
-    import.meta.env.VITE_API_URL || "http://localhost:8081/graphql",
+    import.meta.env.VITE_API_URL || `http://${location.hostname}:8081/graphql`,
     {
       method: "POST",
       headers: {
