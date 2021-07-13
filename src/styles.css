@@ -1,7 +1,7 @@
 @tailwind base;
 
 html {
-  @apply bg-nord0;
+  @apply bg-nord0 text-nord6;
 }
 
 @tailwind components;

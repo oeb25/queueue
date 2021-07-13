@@ -49,28 +49,51 @@ export const App: React.FC<{}> = ({}) => {
   );
 
   return (
-    <div className="w-full text-white">
+    <div className="w-full">
       <header className="p-4 mx-auto">
         <h1 className="text-2xl italic font-black text-center uppercase">
           Queueue
         </h1>
       </header>
-      <main className="grid min-h-[70vh] w-full place-items-center">
-        {!room ? (
-          <LobbyView createRoom={createRoom} />
-        ) : admin ? (
-          <React.Suspense fallback="Loading...">
-            <AdminView roomId={admin.roomId} secret={admin.secret} />
-          </React.Suspense>
-        ) : (
-          <React.Suspense fallback="Loading...">
-            <UserView roomId={roomId!} />
-          </React.Suspense>
-        )}
-      </main>
+      <ErrorBoundary>
+        <main className="grid min-h-[70vh] w-full place-items-center">
+          {!room ? (
+            <LobbyView createRoom={createRoom} />
+          ) : admin ? (
+            <React.Suspense fallback="Loading...">
+              <AdminView roomId={admin.roomId} secret={admin.secret} />
+            </React.Suspense>
+          ) : (
+            <React.Suspense fallback="Loading...">
+              <UserView roomId={roomId!} />
+            </React.Suspense>
+          )}
+        </main>
+      </ErrorBoundary>
     </div>
   );
 };
+
+class ErrorBoundary extends React.Component {
+  state = { error: null as null | { message: string } };
+  static getDerivedStateFromError(error: null | { message: string }) {
+    return { error };
+  }
+  componentDidCatch() {
+    // log the error to the server
+  }
+  tryAgain = () => this.setState({ error: null });
+  render() {
+    return this.state.error ? (
+      <div>
+        There was an error. <button onClick={this.tryAgain}>try again</button>
+        <pre style={{ whiteSpace: "normal" }}>{this.state.error.message}</pre>
+      </div>
+    ) : (
+      this.props.children
+    );
+  }
+}
 
 const LobbyView: React.FC<{ createRoom: () => void }> = ({ createRoom }) => {
   return (
@@ -176,14 +199,14 @@ const AdminView: React.FC<{ roomId: RoomId; secret: Secret }> = ({
       <h1 className="-mt-2 text-lg text-center">
         🙋‍♂️ <span className="italic font-black uppercase">Admin</span> 👩‍💼
       </h1>
-      <div className="text-sm text-center text-gray-400">
+      <div className="text-sm text-center text-nord4">
         <p>Student link:</p>
-        <div className="w-full max-w-sm overflow-x-auto text-xs">
+        <div className="w-full max-w-sm overflow-x-hidden text-xs">
           <pre className="flex bg-transparent select-all">{studentLink}</pre>
         </div>
       </div>
       <div className="text-sm text-center">
-        <p className="text-gray-400">The queue is currently: </p>
+        <p className="text-nord4">The queue is currently:</p>
         <select
           className="px-4 py-2 font-bold bg-transparent text--center"
           value={room.isOpen ? "open" : "closed"}
@@ -203,7 +226,7 @@ const AdminView: React.FC<{ roomId: RoomId; secret: Secret }> = ({
       ) : (
         <div
           className="grid items-center w-full gap-2"
-          style={{ gridTemplateColumns: "1fr 8em auto" }}
+          style={{ gridTemplateColumns: "1fr 9.5em auto" }}
         >
           {tickets.map((q) => {
             const ticketId = q.id ?? ("0" as TicketId);
@@ -214,31 +237,32 @@ const AdminView: React.FC<{ roomId: RoomId; secret: Secret }> = ({
 
             return (
               <React.Fragment key={ticketId}>
-                <div className="text-xl text-center">
-                  <span className="text-base text-gray-400">G</span>
-                  {info.name} <span className="text-gray-700">/</span>{" "}
-                  <span className="text-base text-gray-400">R</span>
-                  {info.room}
-                </div>
-                <button
-                  className={
-                    "px-2 py-2 rounded border transition " +
-                    (q.status.isBeingHelped
-                      ? "bg-nord1 hover:bg-nord3 border-nord4"
-                      : "hover:bg-nord2 border-nord3")
-                  }
-                  onClick={() =>
-                    setHelp({
-                      args: { help: !q.status.isBeingHelped, ticketId },
-                    })
-                  }
-                >
-                  {q.status.isBeingHelped
-                    ? youAreHelping == ticketId
-                      ? "You're helping"
-                      : "Unhelp"
-                    : "Help! 🙋‍♂️"}
-                </button>
+                <ViewGroupInfo info={info} />
+
+                {q.status.isBeingHelped ? (
+                  <StandardButton
+                    active
+                    onClick={() =>
+                      setHelp({
+                        args: { help: !q.status.isBeingHelped, ticketId },
+                      })
+                    }
+                  >
+                    {youAreHelping == ticketId ? "You're helping" : "Unhelp"}
+                  </StandardButton>
+                ) : (
+                  // TODO
+                  <StandardButton
+                    onClick={() =>
+                      setHelp({
+                        args: { help: !q.status.isBeingHelped, ticketId },
+                      })
+                    }
+                  >
+                    Help! 🙋‍♂️
+                  </StandardButton>
+                )}
+
                 <button
                   className={
                     "px-2 py-2 rounded transition " +
@@ -260,17 +284,56 @@ const AdminView: React.FC<{ roomId: RoomId; secret: Secret }> = ({
   );
 };
 
+const StandardButton = ({
+  disabled,
+  onClick,
+  children,
+  left,
+  right,
+  className,
+  active,
+}: {
+  disabled?: boolean;
+  onClick?: () => void;
+  children: React.ReactChild | React.ReactChild[];
+  left?: React.ReactChild | React.ReactChild[];
+  right?: React.ReactChild | React.ReactChild[];
+  className?: string;
+  active?: boolean;
+}) => (
+  <button
+    disabled={disabled}
+    onClick={onClick}
+    className={`flex items-center justify-center px-4 py-2 space-x-2 font-bold transition border rounded border-nord3 group ${
+      active ? "bg-nord1 hover:bg-nord3 border-nord4" : "hover:bg-nord1"
+    } disabled:opacity-50
+      ${className}`}
+  >
+    {left ? (
+      <div className="transition group-hover:-translate-x-1">{left}</div>
+    ) : (
+      void 0
+    )}
+    {children}
+    {right ? (
+      <div className="transition group-hover:translate-x-1">{right}</div>
+    ) : (
+      void 0
+    )}
+  </button>
+);
+
 type GroupInfo = { name: string; room: string };
 
 const Prefix = ({ children }: { children: JSX.Element }) => (
-  <span className="text-sm text-gray-400">{children}</span>
+  <span className="text-sm text-nord4">{children}</span>
 );
 
 const ViewGroupInfo = ({ info }: { info: GroupInfo }) => (
-  <div className="text-xl text-center text-white">
-    <span className="text-base text-gray-400">G</span>
-    {info.name} <span className="text-gray-700">/</span>{" "}
-    <span className="text-base text-gray-400">R</span>
+  <div className="text-xl text-center text-nord6">
+    <span className="text-base text-nord4">G</span>
+    {info.name} <span className="text-nord3">/</span>{" "}
+    <span className="text-base text-nord4">R</span>
     {info.room}
   </div>
 );
@@ -291,7 +354,6 @@ const UserView: React.FC<{
   const refetch = gg.useRefetch();
 
   const room = query.room({ id: roomId });
-  const ticket = ticketId ? room?.ticket({ id: ticketId }) : void 0;
   const isOpen = room?.isOpen ?? false;
 
   // React.useEffect(() => {
@@ -340,33 +402,16 @@ const UserView: React.FC<{
     }
   );
 
-  useInterval(() => refetch(room), 1000);
+  useInterval(() => refetch(room), 5000);
 
   return (
     <>
-      {ticket ? (
-        <div className="flex flex-col items-center p-6">
-          <p className="p-2 text-2xl text-gray-400">
-            <ViewGroupInfo info={JSON.parse(ticket.body || "")} />
-          </p>
-          {ticket.status.isBeingHelped ? (
-            <p className="p-2 pb-4 text-3xl text-center">
-              It's your turn, help is on the way! 🎉
-            </p>
-          ) : (
-            <>
-              <p className="p-2 text-gray-300">Your position in the queue:</p>
-              <p className="text-8xl">{ticket.status.position! + 1}</p>
-            </>
-          )}
-          <button
-            onClick={() => leaveQueue()}
-            className="flex items-center px-4 py-2 mt-4 space-x-2 font-bold transition border border-gray-600 rounded group hover:bg-nord1"
-          >
-            <Hero.ChevronDoubleLeftOutline className="w-4 h-4 transition group-hover:-translate-x-1" />
-            <span>Leave queue</span>
-          </button>
-        </div>
+      {ticketId ? (
+        <UserInQueue
+          roomId={roomId}
+          ticketId={ticketId}
+          leaveQueue={leaveQueue}
+        />
       ) : (
         <form
           className="flex flex-col items-center w-full"
@@ -385,7 +430,7 @@ const UserView: React.FC<{
               <p>Enter your group number and room, and join the queue!</p>
               <label htmlFor="name" className="p-10 pb-4">
                 {groupInfo.name && (
-                  <span className="text-sm text-gray-400">G</span>
+                  <span className="text-sm text-nord4">G</span>
                 )}
                 <input
                   className="text-xl text-center bg-transparent outline-none"
@@ -408,7 +453,7 @@ const UserView: React.FC<{
               </label>
               <label htmlFor="room" className="p-10 pt-4">
                 {groupInfo.room && (
-                  <span className="text-sm text-gray-400">R</span>
+                  <span className="text-sm text-nord4">R</span>
                 )}
                 <input
                   className="text-xl text-center bg-transparent outline-none"
@@ -428,13 +473,13 @@ const UserView: React.FC<{
                   }
                 />
               </label>
-              <button
-                className="flex items-center px-4 py-2 space-x-2 font-bold border border-gray-600 rounded group disabled:opacity-50"
+              <StandardButton
+                onClick={() => {}}
                 disabled={!groupInfo}
+                right={<Hero.ChevronDoubleRightOutline className="w-4 h-4" />}
               >
                 <span>Join queue</span>
-                <Hero.ChevronDoubleRightOutline className="w-4 h-4 transition group-hover:translate-x-1" />
-              </button>
+              </StandardButton>
             </>
           ) : (
             <>
@@ -449,6 +494,66 @@ const UserView: React.FC<{
         </form>
       )}
     </>
+  );
+};
+
+const UserInQueue = ({
+  roomId,
+  ticketId,
+  leaveQueue,
+}: {
+  roomId: RoomId;
+  ticketId: TicketId;
+  leaveQueue: () => void;
+}) => {
+  const query = gg.useQuery({
+    suspense: true,
+    onError(e) {
+      console.error(e);
+      leaveQueue();
+    },
+  });
+  const refetch = gg.useRefetch({});
+  const ticket = query.ticket({ roomId, ticketId });
+
+  useInterval(() => refetch(ticket), 1000);
+
+  React.useEffect(() => {
+    if (!ticket) {
+      leaveQueue();
+    }
+  }, [ticket, leaveQueue]);
+
+  return (
+    <div className="flex flex-col items-center p-6">
+      {ticket?.body ? (
+        <div className="p-2 text-2xl text-nord4">
+          <ViewGroupInfo info={JSON.parse(ticket?.body)} />
+        </div>
+      ) : null}
+      {ticket?.status.isBeingHelped ? (
+        <p className="p-2 pb-4 text-3xl text-center">
+          It's your turn, help is on the way! 🎉
+        </p>
+      ) : (
+        <>
+          <p className="p-2 text-nord4">Your position in the queue:</p>
+          <p className="text-8xl">
+            {Number.isNaN(ticket?.status.position! + 1)
+              ? "?"
+              : ticket?.status.position! + 1}
+          </p>
+        </>
+      )}
+      <div className="mt-4">
+        <StandardButton
+          onClick={leaveQueue}
+          left={<Hero.ChevronDoubleLeftOutline className="w-4 h-4" />}
+        >
+          <span>Leave queue</span>
+        </StandardButton>
+      </div>
+    </div>
   );
 };
 
