@@ -227,6 +227,29 @@ impl QueryRoot {
             Ok(None)
         }
     }
+    async fn ticket(
+        &self,
+        ctx: &Context<'_>,
+        room_id: RoomId,
+        ticket_id: TicketId,
+    ) -> async_graphql::Result<Option<TicketObject>> {
+        if let Ok(r) = ctx.data::<State>()?.get_room(room_id).await {
+            let ro = RoomObject {
+                id: room_id,
+                room: r.clone(),
+            };
+
+            let room = r.lock().await;
+
+            Ok(room.get_ticket(ticket_id).map(|(_, q)| TicketObject {
+                room_object: ro,
+                body: q.body.clone(),
+                id: q.id,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[derive(Clone)]

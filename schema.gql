@@ -1,6 +1,7 @@
 type QueryRoot {
 	rooms: [RoomObject!]!
 	room(id: RoomId!): RoomObject
+	ticket(roomId: RoomId!, ticketId: TicketId!): TicketObject
 }
 type RoomObject {
 	id: RoomId!

@@ -35,6 +35,10 @@ export const generatedSchema = {
     __typename: { __type: "String!" },
     rooms: { __type: "[RoomObject!]!" },
     room: { __type: "RoomObject", __args: { id: "RoomId!" } },
+    ticket: {
+      __type: "TicketObject",
+      __args: { roomId: "RoomId!", ticketId: "TicketId!" },
+    },
   },
   mutation: {
     __typename: { __type: "String!" },
@@ -93,6 +97,10 @@ export interface Query {
   __typename: "Query" | undefined;
   rooms: Array<RoomObject>;
   room: (args: { id: Scalars["RoomId"] }) => Maybe<RoomObject>;
+  ticket: (args: {
+    roomId: Scalars["RoomId"];
+    ticketId: Scalars["TicketId"];
+  }) => Maybe<TicketObject>;
 }
 
 export interface Mutation {
