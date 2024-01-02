@@ -1,5 +1,5 @@
 /**
- * @type {import("@gqless/cli").GQlessConfig}
+ * @type {import("@gqty/cli").GQlessConfig}
  */
 const config = {
   react: true,
@@ -11,7 +11,7 @@ const config = {
     TicketId: 'Opaque<string, "TicketId">',
   },
   introspection: { endpoint: "./schema.gql", headers: {} },
-  destination: "./src/gqless/index.ts",
+  destination: "./src/gqty/index.ts",
   subscriptions: false,
   javascriptOutput: false,
 };

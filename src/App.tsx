@@ -2,7 +2,7 @@
 import notificationSound from "./notification.wav";
 
 import * as React from "react";
-import * as gg from "./gqless";
+import * as gg from "./gqty";
 import * as Hero from "@graywolfai/react-heroicons";
 
 export type RoomId = gg.Scalars["RoomId"];
