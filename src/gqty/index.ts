@@ -15,19 +15,22 @@ const queryFetcher: QueryFetcher = async function (
   fetchOptions
 ) {
   // Modify "./schema.gql" if needed
-  const response = await fetch("./schema.gql", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      query,
-      variables,
-      operationName,
-    }),
-    mode: "cors",
-    ...fetchOptions,
-  });
+  const response = await fetch(
+    import.meta.env.VITE_API_URL || `http://${location.hostname}:8081/graphql`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query,
+        variables,
+        operationName,
+      }),
+      mode: "cors",
+      ...fetchOptions,
+    }
+  );
 
   if (response.status >= 400) {
     throw new GQtyError(
