@@ -20,8 +20,7 @@
     "gqty": "^3.0.0-alpha-7b21563c.0",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.3.3",
-    "vite": "^5.0.10",
-    "vite-plugin-imagemin": "^0.6.1"
+    "vite": "^5.0.10"
   },
   "postcss": {
     "plugins": {
