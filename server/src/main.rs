@@ -148,11 +148,15 @@ struct State {
 impl State {
     async fn get_room(&self, id: RoomId) -> tide::Result<Arc<Mutex<Room>>> {
         let hub = self.hub.lock().await;
-        Ok(hub
-            .get_room(id)
-            .ok_or_else(|| tide::Error::from_str(401, "room does not exist"))?)
+        hub.get_room(id)
+            .ok_or_else(|| tide::Error::from_str(401, "room does not exist"))
     }
 }
+
+#[derive(rust_embed::Embed)]
+#[allow_missing = true]
+#[folder = "../dist"]
+struct Asset;
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
@@ -181,12 +185,38 @@ async fn main() -> tide::Result<()> {
         .post(async_graphql_tide::endpoint(schema));
 
     // enable graphql playground
-    app.at("/").get(|_| async move {
+    app.at("/graphqli").get(|_| async move {
         Ok(tide::Response::builder(tide::StatusCode::Ok)
             .body(tide::Body::from_string(playground_source(
                 GraphQLPlaygroundConfig::new("/graphql"),
             )))
             .content_type(mime::HTML)
+            .build())
+    });
+
+    println!("assets: {:?}", Asset::iter().collect::<Vec<_>>());
+
+    app.at("/").get(|_| async move {
+        Ok(tide::Response::builder(tide::StatusCode::Ok)
+            .body(Asset::get("index.html").unwrap().data.as_ref())
+            .content_type(mime::HTML)
+            .build())
+    });
+    app.at("/*").get(|req: tide::Request<()>| async move {
+        let path = req.url().path().trim_start_matches("/");
+        let Some(asset) = Asset::get(path) else {
+            println!("path {path} not found");
+            return Ok(tide::Response::builder(tide::StatusCode::NotFound).build());
+        };
+        let mime_ty = match () {
+            _ if path.ends_with(".html") => mime::HTML,
+            _ if path.ends_with(".js") => mime::JAVASCRIPT,
+            _ if path.ends_with(".css") => mime::CSS,
+            _ => mime::PLAIN,
+        };
+        Ok(tide::Response::builder(tide::StatusCode::Ok)
+            .body(asset.data.as_ref())
+            .content_type(mime_ty)
             .build())
     });
 
